@@ -27,7 +27,7 @@ class JobStatusUpdate(BaseModel):
 class SearchProfile(BaseModel):
     location: str = "Berlin"
     radius_km: int = Field(default=20, ge=0, le=200)
-    min_score: int = Field(default=60, ge=0, le=100)
+    min_score: int = Field(default=70, ge=0, le=100)
     hours_min: int = Field(default=15, ge=0, le=80)
     hours_max: int = Field(default=20, ge=0, le=80)
     remote_types: list[str] = Field(default_factory=lambda: ["Hybrid", "Remote"])

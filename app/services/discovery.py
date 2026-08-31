@@ -20,6 +20,12 @@ SOURCE_DOMAINS = {
     "kimeta": ("kimeta.de",),
     "linkedin": ("linkedin.com",),
     "arbeitsagentur": ("arbeitsagentur.de",),
+    "studis_online": ("studis-online.de",),
+}
+
+KNOWN_LISTING_PATHS = {
+    ("studis-online.de", "/jobben/werkstudent.php"),
+    ("studis-online.de", "/jobben/studentenjobs.php"),
 }
 
 GENERIC_LIST_PATHS = {
@@ -78,6 +84,10 @@ def is_direct_job_url(url: str, source: str) -> bool:
         return bool(re.search(r"/jobs/[^/?#]+", path))
     if source == "arbeitsagentur":
         return "/jobdetail/" in path
+    if source == "studis_online":
+        if (p.netloc.lower().split(":")[0].endswith("studis-online.de") and path in {"/jobben/werkstudent.php", "/jobben/studentenjobs.php"}):
+            return False
+        return "/jobben/" in path and len([x for x in path.split("/") if x]) >= 2
     if source in {"monster", "jobware", "kimeta"}:
         return any(x in path for x in DIRECT_PATH_HINTS) or any(k in query for k in JOB_QUERY_HINTS)
     return is_generic_job_url(url)
@@ -178,7 +188,14 @@ class PublicDiscovery:
             if not direct and not any(x in (title + " " + snippet).lower() for x in JOB_TEXT_HINTS):
                 return None
         else:
-            if not is_generic_job_url(href):
+            # Generic discovery may return a known job-listing page. Keep it as an
+            # expansion candidate, never as a final job. The scanner will extract
+            # concrete detail links from it before parsing/matching.
+            hp = urlparse(href)
+            hpath = hp.path.lower().rstrip("/")
+            hhost = hp.netloc.lower().split(":")[0]
+            is_known_listing = (hhost.endswith("studis-online.de") and hpath in {"/jobben/werkstudent.php", "/jobben/studentenjobs.php"})
+            if not is_generic_job_url(href) and not is_known_listing:
                 return None
         return RawJob(
             title=title[:500], description=snippet[:4000], url=href,
