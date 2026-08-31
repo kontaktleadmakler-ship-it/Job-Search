@@ -110,7 +110,10 @@ def parse_html(html: str, url: str, source: str) -> RawJob | None:
                 posted_date = datetime.fromisoformat(str(date_value).replace("Z", "+00:00"))
             except ValueError:
                 posted_date = None
-    employment = normalize_space(str((data or {}).get("employmentType", "")))
+    employment_value = (data or {}).get("employmentType", "")
+    if isinstance(employment_value, list):
+        employment_value = " ".join(str(x) for x in employment_value)
+    employment = normalize_space(str(employment_value))
     if employment:
         employment = {"FULL_TIME": "Vollzeit", "PART_TIME": "Teilzeit", "INTERN": "Praktikum", "CONTRACTOR": "Teilzeit"}.get(employment.upper(), employment)
     employment = employment or infer_employment_type(" ".join((title, description)))
@@ -123,6 +126,9 @@ def parse_html(html: str, url: str, source: str) -> RawJob | None:
     elif source == "arbeitsagentur":
         m = re.search(r"/jobdetail/([^/?#]+)", path)
         job_id = m.group(1) if m else ""
+
+    hours_match = re.search(r"\b(\d{1,2}(?:[–-]\d{1,2})?)\s*(?:Stunden|Std\.?|hours|h)\b", text, re.I)
+    hours = hours_match.group(1) + " Stunden" if hours_match else ""
 
     return RawJob(
         title=title, company=company[:300], location=location[:300],

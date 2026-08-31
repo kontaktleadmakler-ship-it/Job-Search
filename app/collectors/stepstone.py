@@ -10,5 +10,8 @@ class StepStoneCollector(JobCollector):
             return []
         out = []
         for employment_type in (profile.employment_types or ["Werkstudent"]):
-            out.extend(await discovery.search_site(query, location, self.name, employment_type))
+            try:
+                out.extend(await discovery.search_site(query, location, self.name, employment_type))
+            except Exception:
+                continue
         return out

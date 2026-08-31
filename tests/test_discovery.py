@@ -26,3 +26,14 @@ def test_unwrap_bing_a1_base64_redirect():
     encoded = base64.urlsafe_b64encode(target.encode()).decode().rstrip("=")
     wrapped = f"https://www.bing.com/ck/a?u=a1{encoded}&ntb=1"
     assert PublicDiscovery._unwrap(wrapped) == target
+
+@pytest.mark.asyncio
+async def test_bing_accepts_stepstone_job_candidate_with_job_terms():
+    class FakeClient:
+        async def get(self, url, **kwargs):
+            html = '<li class="b_algo"><h2><a href="https://www.stepstone.de/stellenangebote--Werkstudent-Finance-Berlin--999.html">Werkstudent Finance</a></h2><div class="b_caption"><p>Werkstudent Finance · Berlin · Bewerben</p></div></li>'
+            return httpx.Response(200, text=html, request=httpx.Request("GET", url))
+    d = PublicDiscovery(FakeClient(), max_results=5, min_interval=0.1)
+    rows = await d._engine('site:stepstone.de "Werkstudent" "Finance" "Berlin"', 'stepstone', 'bing')
+    assert len(rows) == 1
+    assert rows[0].url.endswith('999.html')
