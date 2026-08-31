@@ -54,4 +54,4 @@ class ScanStatus(BaseModel):
     duplicates: int = 0
     filtered: int = 0
     errors: int = 0
-    collectors: dict[str, dict] = {}
+    collectors: dict[str, dict] = Field(default_factory=dict)

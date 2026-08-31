@@ -54,29 +54,39 @@ class ScanManager:
                         "indeed": IndeedCollector(),
                         "generic": GenericCollector(),
                     }
+                    async def run_query(collector, name, q):
+                        async with sem:
+                            return await collector.search(q, self.profile.location, {"discovery": discovery})
+
                     for name in self.profile.sources:
                         collector = collectors.get(name)
                         if not collector:
                             continue
+                        results = await asyncio.gather(
+                            *(run_query(collector, name, q) for q in build_queries(self.profile)),
+                            return_exceptions=True,
+                        )
                         count = errors = 0
                         seen_local = set()
-                        for q in build_queries(self.profile):
-                            try:
-                                async with sem:
-                                    jobs = await collector.search(q, self.profile.location, {"discovery": discovery})
-                                for raw in jobs:
-                                    key = canonicalize_url(raw.url)
-                                    if not safe_job_url(raw.url) or key in seen_local:
-                                        self.status["duplicates"] += 1
-                                        continue
-                                    seen_local.add(key)
-                                    raw.source = name
-                                    await self._upsert(raw)
-                                    count += 1
-                            except Exception as e:
+                        for result in results:
+                            if isinstance(result, Exception):
                                 errors += 1
-                                log.warning("%s query failed: %s", name, e)
-                        self.status["collectors"][name] = {"jobs": count, "errors": errors, "status": "OK" if errors == 0 else "PARTIAL"}
+                                log.warning("%s query failed: %s", name, result)
+                                continue
+                            for raw in result:
+                                key = canonicalize_url(raw.url)
+                                if not safe_job_url(raw.url) or key in seen_local:
+                                    self.status["duplicates"] += 1
+                                    continue
+                                seen_local.add(key)
+                                raw.source = name
+                                await self._upsert(raw)
+                                count += 1
+                        provider = discovery.last_provider or "none"
+                        status = "OK" if errors == 0 and count else ("PARTIAL" if count or errors else "NO_RESULTS")
+                        self.status["collectors"][name] = {
+                            "jobs": count, "errors": errors, "status": status, "provider": provider
+                        }
                         self.status["errors"] += errors
                 self.db.commit()
             except Exception as e:

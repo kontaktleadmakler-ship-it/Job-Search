@@ -14,6 +14,14 @@ services:
         value: "60"
       - key: REQUEST_TIMEOUT
         value: "20"
+      - key: REQUEST_RATE_PER_SECOND
+        value: "1.0"
+      - key: DISCOVERY_ENABLED
+        value: "true"
+      - key: DISCOVERY_PROVIDER
+        value: "duckduckgo"
+      - key: DISCOVERY_MAX_RESULTS
+        value: "10"
       - key: MAX_CONCURRENT_REQUESTS
         value: "3"
       - key: DEFAULT_LOCATION
