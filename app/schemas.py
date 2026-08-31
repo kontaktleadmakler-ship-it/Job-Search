@@ -48,7 +48,10 @@ class SearchProfile(BaseModel):
         "Second Level Support", "Technischer Support", "Technical Support", "Systemadministrator",
         "System Administration"
     ]
-    sources: list[str] = ["stepstone", "indeed", "generic"]
+    sources: list[str] = [
+        "stepstone", "indeed", "generic", "xing", "monster",
+        "jobware", "kimeta", "linkedin", "arbeitsagentur",
+    ]
     scan_interval_minutes: int = Field(default=60, ge=5, le=1440)
 
     def effective_roles(self) -> list[str]:

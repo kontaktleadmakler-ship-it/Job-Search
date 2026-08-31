@@ -8,6 +8,12 @@ from app.config import get_settings
 from app.collectors.stepstone import StepStoneCollector
 from app.collectors.indeed import IndeedCollector
 from app.collectors.generic import GenericCollector
+from app.collectors.xing import XingCollector
+from app.collectors.monster import MonsterCollector
+from app.collectors.jobware import JobwareCollector
+from app.collectors.kimeta import KimetaCollector
+from app.collectors.linkedin import LinkedinCollector
+from app.collectors.arbeitsagentur import ArbeitsagenturCollector
 from app.collectors.base import RawJob, safe_job_url
 from app.services.discovery import PublicDiscovery
 from app.services.deduplicator import canonicalize_url, fingerprint
@@ -58,14 +64,24 @@ class ScanManager:
             try:
                 async with httpx.AsyncClient(timeout=settings.request_timeout, headers=headers, limits=limits, follow_redirects=True) as client:
                     discovery = PublicDiscovery(client, settings.discovery_max_results, 1.0 / max(settings.request_rate_per_second, 0.1))
-                    collectors = {"stepstone": StepStoneCollector(), "indeed": IndeedCollector(), "generic": GenericCollector()}
+                    collectors = {
+                        "stepstone": StepStoneCollector(),
+                        "indeed": IndeedCollector(),
+                        "generic": GenericCollector(),
+                        "xing": XingCollector(),
+                        "monster": MonsterCollector(),
+                        "jobware": JobwareCollector(),
+                        "kimeta": KimetaCollector(),
+                        "linkedin": LinkedinCollector(),
+                        "arbeitsagentur": ArbeitsagenturCollector(),
+                    }
                     for name in self.profile.sources:
                         collector = collectors.get(name)
                         if not collector: continue
                         count = errors = 0; seen_local = set()
                         for q in build_queries(self.profile):
                             try:
-                                jobs = await collector.search(q, self.profile.location, {"discovery": discovery})
+                                jobs = await collector.search(q, self.profile.location, {"discovery": discovery, "client": client})
                                 for raw in jobs:
                                     raw.source = name
                                     raw = await self._enrich(client, raw)
@@ -76,7 +92,7 @@ class ScanManager:
                                     count += 1
                             except Exception as e:
                                 errors += 1; log.warning("%s query failed: %s", name, e)
-                        provider = discovery.last_provider or "none"
+                        provider = "official-api" if name == "arbeitsagentur" else (discovery.last_provider or "none")
                         self.status["collectors"][name] = {"jobs": count, "errors": errors,
                             "status": "OK" if count and not errors else ("PARTIAL" if count or errors else "NO_RESULTS"), "provider": provider}
                         self.status["errors"] += errors

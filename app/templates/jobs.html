@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% block title %}Jobs · Berlin Job Radar{% endblock %}
 {% block content %}
 <section class="page-head"><div><p class="eyebrow">DISCOVERY</p><h1>Jobs</h1></div><button class="primary" onclick="startScan()">🔍 Jetzt scannen</button></section>
-<div class="filters"><input id="q" placeholder="Suchbegriff"><input id="min_score" type="number" min="0" max="100" value="70" placeholder="Score ≥"><select id="source"><option value="">Alle Quellen</option><option>stepstone</option><option>indeed</option><option>generic</option></select><select id="status"><option value="">Alle Status</option><option>new</option><option>saved</option><option>applied</option><option>rejected</option></select><button onclick="loadJobs()">Filtern</button></div>
+<div class="filters"><input id="q" placeholder="Suchbegriff"><input id="min_score" type="number" min="0" max="100" placeholder="Score ≥"><select id="source"><option value="">Alle Quellen</option><option>stepstone</option><option>indeed</option><option>generic</option><option>xing</option><option>monster</option><option>jobware</option><option>kimeta</option><option>linkedin</option><option>arbeitsagentur</option></select><select id="status"><option value="">Alle Status</option><option>new</option><option>saved</option><option>applied</option><option>rejected</option></select><button onclick="loadJobs()">Filtern</button></div>
 <div id="jobs" class="job-grid"></div>
 <div class="pager"><button onclick="changePage(-1)">←</button><span id="page">1</span><button onclick="changePage(1)">→</button></div>
 {% endblock %}
