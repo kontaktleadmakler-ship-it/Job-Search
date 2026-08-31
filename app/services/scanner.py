@@ -16,7 +16,7 @@ from app.collectors.kimeta import KimetaCollector
 from app.collectors.linkedin import LinkedinCollector
 from app.collectors.arbeitsagentur import ArbeitsagenturCollector
 from app.collectors.base import RawJob, safe_job_url
-from app.services.discovery import PublicDiscovery, is_direct_job_url, is_generic_job_url
+from app.services.discovery import PublicDiscovery, is_direct_job_url, is_generic_job_url, source_for_url
 from app.services.deduplicator import canonicalize_url, fingerprint
 from app.services.matcher import score_job
 from app.services.job_parser import parse_html, infer_employment_type
@@ -115,8 +115,12 @@ class ScanManager:
                             if not jobs and name in PORTAL_SOURCES:
                                 jobs = await self._discover_fallback(discovery, q)
                             for raw in jobs:
-                                if raw.source != "generic":
-                                    raw.source = name
+                                # Never relabel a generic fallback as the portal that
+                                # failed. Determine the actual source from the URL.
+                                if raw.source == "generic":
+                                    raw.source = source_for_url(raw.url)
+                                elif raw.source != name:
+                                    raw.source = source_for_url(raw.url) or name
                                 enriched = await self._enrich(client, raw)
                                 if not enriched:
                                     continue

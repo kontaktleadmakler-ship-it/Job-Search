@@ -31,13 +31,15 @@ DIRECT_PATH_HINTS = (
     "/job/", "/jobs/", "/stellenangebot", "/stellenangebote--", "/jobdetail/",
     "/jobs/view/", "/position/", "/vacancy/", "/requisition/", "/stellenanzeige/",
     "/jobposting/", "/job-detail/", "/career/job/", "/careers/job/", "/openings/",
+    "/viewjob", "/pagead/clk", "/rc/clk",
 )
 JOB_QUERY_HINTS = ("jobid", "job_id", "vacancy", "vacancyid", "positionid", "requisitionid", "reqid", "jk")
 JOB_TEXT_HINTS = (
     "werkstudent", "working student", "vollzeit", "full-time", "teilzeit", "part-time",
     "praktikum", "internship", "stellenangebot", "job description", "aufgaben", "qualifikationen",
-    "bewerben", "apply now", "hiring organization",
+    "bewerben", "apply now", "hiring organization", "wir suchen", "your responsibilities",
 )
+SEARCH_ENGINES = ("bing", "duckduckgo")
 
 
 def _host_allowed(url: str, domains: tuple[str, ...]) -> bool:
@@ -46,6 +48,14 @@ def _host_allowed(url: str, domains: tuple[str, ...]) -> bool:
         return any(host == d or host.endswith("." + d) for d in domains)
     except Exception:
         return False
+
+
+def source_for_url(url: str) -> str:
+    host = urlparse(url).netloc.lower().split(":")[0]
+    for source, domains in SOURCE_DOMAINS.items():
+        if any(host == d or host.endswith("." + d) for d in domains):
+            return source
+    return "generic"
 
 
 def is_direct_job_url(url: str, source: str) -> bool:
@@ -61,7 +71,7 @@ def is_direct_job_url(url: str, source: str) -> bool:
     if source == "indeed":
         return ("/viewjob" in path or "/pagead/clk" in path or "/rc/clk" in path or "jk=" in query)
     if source == "stepstone":
-        return bool(re.search(r"/stellenangebote--[^/?#]+", path) or re.search(r"/jobs?/[^/?#]+", path) or "/stellenangebot/" in path)
+        return bool(re.search(r"/stellenangebote--[^/?#]+", path) or re.search(r"/jobs?/[^/?#]+", path) or "/stellenangebot/" in path or "/stellenangebote/" in path)
     if source == "linkedin":
         return bool(re.search(r"/jobs/view/[^/?#]+", path))
     if source == "xing":
@@ -87,22 +97,26 @@ def is_generic_job_url(url: str) -> bool:
         return True
     if any(k in p.query.lower() for k in JOB_QUERY_HINTS):
         return True
-    # A specific slug plus a non-root path is acceptable as a candidate. The page
-    # itself is validated during enrichment before it is stored as a job.
     segments = [s for s in path.split("/") if s]
     return len(segments) >= 2 and any(x in path for x in ("career", "careers", "jobs", "job", "position", "vacanc", "opening", "stellen"))
 
 
 class PublicDiscovery:
+    """Public search discovery with polite throttling, retries and provider isolation.
+
+    This intentionally does not attempt to defeat anti-bot controls. A blocked provider is
+    marked unavailable and the next provider is used instead.
+    """
     def __init__(self, client: httpx.AsyncClient, max_results=10, min_interval=0.75, request_timeout=8.0):
         self.client = client
         self.max_results = max(1, int(max_results))
-        self.min_interval = max(0.1, float(min_interval))
+        self.min_interval = max(0.2, float(min_interval))
         self.request_timeout = max(2.0, float(request_timeout))
         self._rate_lock = asyncio.Lock()
         self._last_request = 0.0
         self.last_provider = None
         self.last_error = None
+        self.provider_state = {p: "ready" for p in SEARCH_ENGINES}
 
     async def _throttle(self):
         async with self._rate_lock:
@@ -129,7 +143,6 @@ class PublicDiscovery:
                         return value
             value = qs.get("u", [None])[0]
             if value:
-                value = unquote(value)
                 candidates = [value[2:]] if value.startswith("a1") else []
                 candidates.append(value)
                 for encoded in candidates:
@@ -153,14 +166,15 @@ class PublicDiscovery:
         snippet = normalize_space(snippet)
         if not title or len(title) < 5 or not safe_job_url(href):
             return None
-        # Do not reject a plausible search-engine target solely because its exact
-        # path format is unknown. We still reject known portal home/search pages.
         if source != "generic":
             if not _host_allowed(href, SOURCE_DOMAINS.get(source, ())):
                 return None
             if urlparse(href).path.lower().rstrip("/") in GENERIC_LIST_PATHS:
                 return None
             direct = is_direct_job_url(href, source)
+            # Search engines sometimes expose a valid job page using a new URL pattern.
+            # Keep it as a candidate when the result itself strongly looks like a job;
+            # enrichment performs the final validation.
             if not direct and not any(x in (title + " " + snippet).lower() for x in JOB_TEXT_HINTS):
                 return None
         else:
@@ -175,15 +189,23 @@ class PublicDiscovery:
     def _parse_bing(html: str, source: str, max_results: int) -> list[RawJob]:
         soup = BeautifulSoup(html or "", "html.parser")
         out, seen = [], set()
-        items = soup.select("li.b_algo") or soup.select("h2 a")
-        for item in items:
-            a = item if item.name == "a" else item.select_one("h2 a")
-            if not a:
+        anchors = []
+        for item in soup.select("li.b_algo"):
+            a = item.select_one("h2 a") or item.select_one("a")
+            if a:
+                anchors.append((a, item))
+        if not anchors:
+            for a in soup.select("main a[href], #b_content a[href], h2 a[href]"):
+                anchors.append((a, a.parent))
+        for a, container in anchors:
+            href = a.get("href", "")
+            if not href:
                 continue
-            container = item if item.name != "a" else a.parent
-            snippet_node = container.select_one(".b_caption p") if container else None
+            snippet_node = None
+            if container:
+                snippet_node = container.select_one(".b_caption p, .b_paractl, p")
             raw = PublicDiscovery._candidate(
-                a.get_text(" ", strip=True), a.get("href", ""),
+                a.get_text(" ", strip=True), href,
                 snippet_node.get_text(" ", strip=True) if snippet_node else "", source
             )
             if raw and raw.url not in seen:
@@ -212,31 +234,46 @@ class PublicDiscovery:
     async def _engine(self, q: str, source: str, provider: str) -> list[RawJob]:
         if provider == "bing":
             r = await self._get("https://www.bing.com/search?q=" + quote_plus(q) + "&count=" + str(max(self.max_results, 10)))
+            if r.status_code in (403, 429):
+                self.provider_state[provider] = f"blocked:{r.status_code}"
+                raise RuntimeError(f"Bing HTTP {r.status_code}")
             r.raise_for_status()
-            return self._parse_bing(r.text, source, self.max_results)
+            rows = self._parse_bing(r.text, source, self.max_results)
+            if not rows:
+                raise RuntimeError("Bing: keine verwertbaren Kandidaten")
+            return rows
+        last = None
         for endpoint in ("https://html.duckduckgo.com/html/?q=", "https://lite.duckduckgo.com/lite/?q="):
             try:
-                r = await self._get(endpoint + quote_plus(q)); r.raise_for_status()
+                r = await self._get(endpoint + quote_plus(q))
+                if r.status_code in (403, 429):
+                    self.provider_state[provider] = f"blocked:{r.status_code}"
+                    last = RuntimeError(f"DuckDuckGo HTTP {r.status_code}")
+                    continue
+                r.raise_for_status()
                 rows = self._parse_ddg(r.text, source, self.max_results)
                 if rows:
                     return rows
-            except Exception:
-                continue
-        return []
+                last = RuntimeError("DuckDuckGo: keine verwertbaren Kandidaten")
+            except Exception as exc:
+                last = exc
+        raise last or RuntimeError("DuckDuckGo unavailable")
 
     async def search(self, q: str, source: str) -> list[RawJob]:
         errors = []
-        for provider in ("duckduckgo", "bing"):
+        for provider in SEARCH_ENGINES:
             try:
                 rows = await self._engine(q, source, provider)
                 if rows:
-                    self.last_provider = provider; self.last_error = None
+                    self.last_provider = provider
+                    self.last_error = None
+                    self.provider_state[provider] = "ok"
                     return rows
-                errors.append(f"{provider}: keine Kandidaten")
             except Exception as exc:
                 errors.append(f"{provider}: {exc}")
+                log.debug("discovery provider %s failed: %s", provider, exc)
         self.last_provider = None
-        self.last_error = " | ".join(errors)
+        self.last_error = " | ".join(errors) or "keine Discovery-Provider verfügbar"
         raise RuntimeError(self.last_error)
 
     async def search_site(self, query: str, location: str, source: str, employment_type: str) -> list[RawJob]:
