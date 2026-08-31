@@ -1,0 +1,55 @@
+import asyncio
+import html
+import logging
+import time
+from urllib.parse import quote_plus, urlparse, parse_qs
+import httpx
+from bs4 import BeautifulSoup
+from app.collectors.base import RawJob, safe_job_url, normalize_space
+
+log = logging.getLogger(__name__)
+
+class PublicDiscovery:
+    def __init__(self, client: httpx.AsyncClient, max_results=10, min_interval=0.75):
+        self.client = client
+        self.max_results = max_results
+        self.min_interval = max(0.1, float(min_interval))
+        self._rate_lock = asyncio.Lock()
+        self._last_request = 0.0
+
+    async def _throttle(self):
+        async with self._rate_lock:
+            wait = self.min_interval - (time.monotonic() - self._last_request)
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._last_request = time.monotonic()
+
+    async def _ddg(self, q: str) -> list[tuple[str,str]]:
+        url = "https://html.duckduckgo.com/html/?q=" + quote_plus(q)
+        await self._throttle()
+        r = await self.client.get(url)
+        r.raise_for_status()
+        soup = BeautifulSoup(r.text, "html.parser")
+        out = []
+        for a in soup.select("a.result__a"):
+            href = a.get("href", "")
+            title = normalize_space(a.get_text(" ", strip=True))
+            if safe_job_url(href):
+                out.append((title, href))
+        return out[:self.max_results]
+
+    async def search_site(self, query: str, location: str, domain: str) -> list[RawJob]:
+        try:
+            rows = await self._ddg(f"site:{domain} {query} {location}")
+        except Exception as e:
+            log.warning("public discovery failed for %s: %s", domain, e)
+            return []
+        return [RawJob(title=t, url=u, source=domain) for t,u in rows]
+
+    async def search_generic(self, query: str, location: str) -> list[RawJob]:
+        try:
+            rows = await self._ddg(f'"{query}" "{location}" Werkstudent')
+        except Exception as e:
+            log.warning("generic discovery failed: %s", e)
+            return []
+        return [RawJob(title=t, url=u, source="generic") for t,u in rows]
