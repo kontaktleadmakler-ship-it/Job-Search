@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block title %}Dashboard · Berlin Job Radar{% endblock %}
+{% block content %}
+<section class="hero"><div><p class="eyebrow">PERSONAL JOB DISCOVERY</p><h1>Die besten Werkstudentenstellen. <span>Direkt.</span></h1><p>Öffentlich verfügbare Angebote entdecken, transparent bewerten und direkt zur Originalanzeige wechseln.</p></div><button class="primary" onclick="startScan()">🔍 Jetzt scannen</button></section>
+<section class="stats" id="stats"></section>
+<section class="panel"><div class="panel-head"><h2>Top Jobs</h2><a href="/jobs">Alle Jobs →</a></div><div id="jobs" class="job-grid"></div></section>
+<section class="panel"><div class="panel-head"><h2>Scanner</h2><span id="scanner-status" class="pill">ONLINE</span></div><div id="scan"></div></section>
+{% endblock %}

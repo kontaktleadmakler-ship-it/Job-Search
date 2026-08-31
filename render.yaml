@@ -1,0 +1,24 @@
+services:
+  - type: web
+    name: berlin-job-radar
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.9
+      - key: DATABASE_URL
+        sync: false
+      - key: SCAN_INTERVAL_MINUTES
+        value: "60"
+      - key: REQUEST_TIMEOUT
+        value: "20"
+      - key: MAX_CONCURRENT_REQUESTS
+        value: "3"
+      - key: DEFAULT_LOCATION
+        value: Berlin
+      - key: DEFAULT_RADIUS_KM
+        value: "20"
+      - key: MIN_MATCH_SCORE
+        value: "70"

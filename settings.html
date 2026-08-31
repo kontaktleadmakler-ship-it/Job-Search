@@ -1,0 +1,10 @@
+{% extends "base.html" %}{% block title %}Suchprofil · Berlin Job Radar{% endblock %}
+{% block content %}
+<section class="page-head"><div><p class="eyebrow">KONFIGURATION</p><h1>Suchprofil</h1></div></section>
+<form id="settings-form" class="settings">
+<label>Standort<input id="location"></label><label>Radius (km)<input id="radius_km" type="number"></label><label>Mindestscore<input id="min_score" type="number" min="0" max="100"></label>
+<label>Stunden min.<input id="hours_min" type="number"></label><label>Stunden max.<input id="hours_max" type="number"></label><label>Scanintervall (Min.)<input id="scan_interval_minutes" type="number"></label>
+<label>Keywords <textarea id="keywords"></textarea></label><label>Ausschlüsse <textarea id="exclusions"></textarea></label><label>Remote-Typen <input id="remote_types"></label>
+<div><button class="primary" type="submit">Speichern</button><span id="saved"></span></div>
+</form>
+{% endblock %}

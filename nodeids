@@ -1,0 +1,13 @@
+[
+  "tests/test_api.py::test_health",
+  "tests/test_api.py::test_settings_api",
+  "tests/test_deduplicator.py::test_fingerprint_same",
+  "tests/test_deduplicator.py::test_same_url_canonicalizes",
+  "tests/test_deduplicator.py::test_source_job_id_identity",
+  "tests/test_matcher.py::test_fulltime_penalty",
+  "tests/test_matcher.py::test_internship_penalty",
+  "tests/test_matcher.py::test_werkstudent_berlin_finance_high",
+  "tests/test_parser.py::test_parser_basic_html",
+  "tests/test_parser.py::test_parser_rejects_bad_url",
+  "tests/test_queries.py::test_queries_are_dynamic"
+]
