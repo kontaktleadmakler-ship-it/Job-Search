@@ -46,19 +46,15 @@ app.include_router(router)
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
-   return templates.TemplateResponse(
-    request=request,
-    name="index.html",
-    context={}
-)
+    return templates.TemplateResponse(request=request, name="index.html", context={})
 
 @app.get("/jobs", response_class=HTMLResponse)
 async def jobs_page(request: Request):
-    return templates.TemplateResponse("jobs.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="jobs.html", context={})
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
-    return templates.TemplateResponse("settings.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="settings.html", context={})
 
 @app.get("/health")
 def health():
