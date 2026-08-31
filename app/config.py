@@ -24,6 +24,7 @@ class Settings(BaseModel):
     discovery_enabled: bool = os.getenv("DISCOVERY_ENABLED", "true").lower() == "true"
     discovery_provider: str = os.getenv("DISCOVERY_PROVIDER", "duckduckgo")
     discovery_max_results: int = int(os.getenv("DISCOVERY_MAX_RESULTS", "10"))
+    discovery_timeout: float = float(os.getenv("DISCOVERY_TIMEOUT", "8"))
     source_urls: str = os.getenv("SOURCE_URLS", "")
 
     @property

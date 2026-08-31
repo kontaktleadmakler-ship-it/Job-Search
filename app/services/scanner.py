@@ -63,7 +63,7 @@ class ScanManager:
             headers = {"User-Agent": settings.user_agent, "Accept-Language": "de-DE,de;q=0.8,en;q=0.6"}
             try:
                 async with httpx.AsyncClient(timeout=settings.request_timeout, headers=headers, limits=limits, follow_redirects=True) as client:
-                    discovery = PublicDiscovery(client, settings.discovery_max_results, 1.0 / max(settings.request_rate_per_second, 0.1))
+                    discovery = PublicDiscovery(client, settings.discovery_max_results, 1.0 / max(settings.request_rate_per_second, 0.1), settings.discovery_timeout)
                     collectors = {
                         "stepstone": StepStoneCollector(),
                         "indeed": IndeedCollector(),
@@ -96,7 +96,12 @@ class ScanManager:
                         self.status["collectors"][name] = {"jobs": count, "errors": errors,
                             "status": "OK" if count and not errors else ("PARTIAL" if count or errors else "NO_RESULTS"), "provider": provider}
                         self.status["errors"] += errors
-                self.db.commit()
+                        # Commit after every source instead of only at the very end: a
+                        # scan across many sources/queries can take minutes, and a
+                        # deploy/restart mid-scan must not discard already-found jobs.
+                        # It also lets the dashboard show results while a scan is
+                        # still in progress rather than only once it fully finishes.
+                        self.db.commit()
             except Exception as e:
                 self.db.rollback(); self.status["last_error"] = str(e); log.exception("scan failed")
             finally:

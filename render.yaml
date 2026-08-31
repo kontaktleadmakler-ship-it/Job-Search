@@ -22,6 +22,8 @@ services:
         value: "duckduckgo"
       - key: DISCOVERY_MAX_RESULTS
         value: "10"
+      - key: DISCOVERY_TIMEOUT
+        value: "8"
       - key: MAX_CONCURRENT_REQUESTS
         value: "3"
       - key: DEFAULT_LOCATION

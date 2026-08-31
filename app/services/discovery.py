@@ -12,14 +12,24 @@ log = logging.getLogger(__name__)
 class PublicDiscovery:
     """Public search-engine discovery only. No login, CAPTCHA or anti-bot bypass."""
 
-    def __init__(self, client: httpx.AsyncClient, max_results=10, min_interval=0.75):
+    def __init__(self, client: httpx.AsyncClient, max_results=10, min_interval=0.75, request_timeout=8.0):
         self.client = client
         self.max_results = max(1, int(max_results))
         self.min_interval = max(0.1, float(min_interval))
+        self.request_timeout = max(2.0, float(request_timeout))
         self._rate_lock = asyncio.Lock()
         self._last_request = 0.0
         self.last_provider = None
         self.last_error = None
+        # Circuit breaker: if a provider fails repeatedly during this scan
+        # (e.g. blocked from this host's IP), stop retrying it on every
+        # single query and go straight to the next provider instead. This
+        # avoids burning the full request_timeout twice per query for the
+        # whole duration of a scan with many role queries.
+        self._ddg_failures = 0
+        self._ddg_disabled = False
+        self._bing_failures = 0
+        self._bing_disabled = False
 
     async def _throttle(self):
         async with self._rate_lock:
@@ -30,7 +40,7 @@ class PublicDiscovery:
 
     async def _get(self, url: str) -> httpx.Response:
         await self._throttle()
-        return await self.client.get(url)
+        return await self.client.get(url, timeout=self.request_timeout)
 
     @staticmethod
     def _unwrap(url: str) -> str:
@@ -125,19 +135,38 @@ class PublicDiscovery:
         return out[:self.max_results]
 
     async def search(self, q: str) -> list[tuple[str, str]]:
-        """Try the configured public provider, then a second public provider."""
+        """Try the configured public provider, then a second public provider.
+
+        Uses a per-instance circuit breaker: once a provider has failed
+        repeatedly in this scan, it is skipped for subsequent queries so a
+        single blocked provider doesn't cost a full timeout on every query.
+        """
         self.last_error = None
         errors = []
-        try:
-            return await self._ddg(q)
-        except Exception as exc:
-            errors.append(f"duckduckgo: {exc}")
-        try:
-            return await self._bing(q)
-        except Exception as exc:
-            errors.append(f"bing: {exc}")
+        if not self._ddg_disabled:
+            try:
+                result = await self._ddg(q)
+                self._ddg_failures = 0
+                return result
+            except Exception as exc:
+                errors.append(f"duckduckgo: {exc}")
+                self._ddg_failures += 1
+                if self._ddg_failures >= 2:
+                    self._ddg_disabled = True
+                    log.warning("DuckDuckGo scheint blockiert/unerreichbar zu sein - wird für den Rest dieses Scans übersprungen")
+        if not self._bing_disabled:
+            try:
+                result = await self._bing(q)
+                self._bing_failures = 0
+                return result
+            except Exception as exc:
+                errors.append(f"bing: {exc}")
+                self._bing_failures += 1
+                if self._bing_failures >= 2:
+                    self._bing_disabled = True
+                    log.warning("Bing scheint blockiert/unerreichbar zu sein - wird für den Rest dieses Scans übersprungen")
         self.last_provider = None
-        self.last_error = " | ".join(errors)
+        self.last_error = " | ".join(errors) if errors else "alle Discovery-Provider deaktiviert (zuvor wiederholt fehlgeschlagen)"
         raise RuntimeError(self.last_error)
 
     async def search_site(self, query: str, location: str, domain: str) -> list[RawJob]:
