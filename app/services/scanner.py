@@ -15,7 +15,7 @@ from app.collectors.kimeta import KimetaCollector
 from app.collectors.linkedin import LinkedinCollector
 from app.collectors.arbeitsagentur import ArbeitsagenturCollector
 from app.collectors.base import RawJob, safe_job_url
-from app.services.discovery import PublicDiscovery
+from app.services.discovery import PublicDiscovery, is_direct_job_url, is_generic_job_url
 from app.services.deduplicator import canonicalize_url, fingerprint
 from app.services.matcher import score_job
 from app.services.job_parser import parse_html
@@ -39,26 +39,20 @@ class ScanManager:
         try:
             r = await client.get(raw.url, timeout=min(12, get_settings().request_timeout), follow_redirects=True)
             r.raise_for_status()
-            final_url = str(r.url)
-            from app.services.discovery import is_direct_job_url, is_generic_job_url
-            if raw.source != "generic":
-                if not is_direct_job_url(final_url, raw.source):
-                    final_url = raw.url
-            elif not is_generic_job_url(final_url):
-                final_url = raw.url
-            parsed = parse_html(r.text, final_url, raw.source)
+            parsed = parse_html(r.text, str(r.url), raw.source)
             if parsed:
+                # Search-engine title is often better; keep it if parser title is weak.
                 if len(parsed.title) >= 8: raw.title = parsed.title
                 if parsed.company: raw.company = parsed.company
                 if parsed.location: raw.location = parsed.location
                 if parsed.description: raw.description = parsed.description
-                if parsed.employment_type: raw.employment_type = parsed.employment_type
-                if parsed.hours: raw.hours = parsed.hours
-                if parsed.salary: raw.salary = parsed.salary
-                if parsed.remote_type: raw.remote_type = parsed.remote_type
-                if parsed.posted_date: raw.posted_date = parsed.posted_date
-                if parsed.source_job_id: raw.source_job_id = parsed.source_job_id
-                raw.url = final_url
+                redirected = str(r.url)
+                # Never replace a verified job URL with a portal homepage/search URL after a redirect.
+                if safe_job_url(redirected) and (
+                    is_direct_job_url(redirected, raw.source) or
+                    (raw.source == "generic" and is_generic_job_url(redirected))
+                ):
+                    raw.url = redirected
         except Exception as e:
             log.debug("job enrichment failed %s: %s", raw.url, e)
         return raw
@@ -91,7 +85,23 @@ class ScanManager:
                         count = errors = 0; seen_local = set()
                         for q in build_queries(self.profile):
                             try:
-                                jobs = await collector.search(q, self.profile.location, {"discovery": discovery, "client": client, "profile": self.profile})
+                                try:
+                                    jobs = await collector.search(q, self.profile.location, {"discovery": discovery, "client": client, "profile": self.profile})
+                                except Exception as primary_error:
+                                    # Job portals are often not indexable. Fall back to public
+                                    # search for direct company/ATS job pages rather than storing
+                                    # portal homepages or search pages.
+                                    if name in {"stepstone", "indeed", "xing", "monster", "jobware", "kimeta", "linkedin"}:
+                                        jobs = []
+                                        for employment_type in (self.profile.employment_types or ["Werkstudent"]):
+                                            try:
+                                                jobs.extend(await discovery.search_generic(q, self.profile.location, employment_type))
+                                            except Exception as fallback_error:
+                                                log.warning("%s generic fallback failed for %s: %s", name, employment_type, fallback_error)
+                                        for raw in jobs:
+                                            raw.source = "generic"
+                                    else:
+                                        raise primary_error
                                 for raw in jobs:
                                     raw.source = name
                                     raw = await self._enrich(client, raw)

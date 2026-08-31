@@ -13,6 +13,7 @@ class ArbeitsagenturCollector(JobCollector):
     async def search(self, query: str, location: str, filters: dict) -> list[RawJob]:
         client = filters.get("client")
         profile = filters.get("profile")
+        discovery = filters.get("discovery")
         if client is None:
             return []
         types = (profile.employment_types if profile else None) or ["Werkstudent"]
@@ -21,7 +22,7 @@ class ArbeitsagenturCollector(JobCollector):
         for employment_type in types:
             params = {"was": f"{employment_type} {query}", "wo": location, "angebotsart": 1, "size": 25}
             try:
-                r = await client.get(API_URL, params=params, headers={"X-API-Key": API_KEY}, timeout=15)
+                r = await client.get(API_URL, params=params, headers={"X-API-Key": API_KEY, "Accept": "application/json"}, timeout=15)
                 r.raise_for_status()
                 data = r.json()
             except Exception as e:
@@ -38,19 +39,17 @@ class ArbeitsagenturCollector(JobCollector):
                 ort = normalize_space((item.get("arbeitsort") or {}).get("ort", ""))
                 posted = None
                 if item.get("aktuelleVeroeffentlichungsdatum"):
-                    try:
-                        posted = datetime.fromisoformat(item["aktuelleVeroeffentlichungsdatum"])
-                    except ValueError:
-                        pass
-                jobs.append(RawJob(
-                    title=normalize_space(item.get("titel", "")),
-                    company=normalize_space(item.get("arbeitgeber", "")),
-                    location=ort,
-                    description=normalize_space(item.get("stellenbeschreibung", "")),
-                    url=url,
-                    source=self.name,
-                    source_job_id=ref,
-                    posted_date=posted,
-                    employment_type=employment_type
-                ))
-        return jobs
+                    try: posted = datetime.fromisoformat(item["aktuelleVeroeffentlichungsdatum"])
+                    except ValueError: pass
+                jobs.append(RawJob(title=normalize_space(item.get("titel", "")), company=normalize_space(item.get("arbeitgeber", "")), location=ort, description=normalize_space(item.get("stellenbeschreibung", "")), url=url, source=self.name, source_job_id=ref, posted_date=posted, employment_type=employment_type))
+        if jobs:
+            return jobs
+        # The public API is intermittently protected with 403. If that happens,
+        # use the same direct-job discovery path as the other sources.
+        if discovery:
+            try:
+                rows = await discovery.search_generic(query, location, types[0])
+                return [r for r in rows if safe_job_url(r.url)]
+            except Exception as exc:
+                log.warning("Arbeitsagentur public fallback failed: %s", exc)
+        return []

@@ -88,33 +88,32 @@ def parse_html(html: str, url: str, source: str) -> RawJob | None:
                     break
 
     description = normalize_space(_value((data or {}).get("description"))) or text[:10000]
+    hours = ""
+    salary = ""
+    remote_type = ""
+    posted_date = None
+    if data:
+        salary_data = data.get("baseSalary") or data.get("salary")
+        if isinstance(salary_data, dict):
+            val = salary_data.get("value")
+            if isinstance(val, dict):
+                val = val.get("value") or val.get("minValue") or ""
+            salary = normalize_space(str(val or salary_data.get("name", "")))
+        elif salary_data:
+            salary = normalize_space(str(salary_data))
+        job_location_type = str(data.get("jobLocationType", ""))
+        if job_location_type:
+            remote_type = "Remote" if job_location_type.upper() == "TELECOMMUTE" else job_location_type
+        date_value = data.get("datePosted")
+        if date_value:
+            try:
+                posted_date = datetime.fromisoformat(str(date_value).replace("Z", "+00:00"))
+            except ValueError:
+                posted_date = None
     employment = normalize_space(str((data or {}).get("employmentType", "")))
     if employment:
         employment = {"FULL_TIME": "Vollzeit", "PART_TIME": "Teilzeit", "INTERN": "Praktikum", "CONTRACTOR": "Teilzeit"}.get(employment.upper(), employment)
-    employment = employment or infer_employment_type(" ".join((title, description, text)))
-
-    hours = ""
-    hour_match = re.search(r"\b(\d{1,2})\s*(?:-|–|bis)?\s*(?:\d{1,2})?\s*(?:stunden|hours|std\.?)\b", text, re.I)
-    if hour_match:
-        hours = normalize_space(hour_match.group(0))
-
-    salary = ""
-    salary_match = re.search(r"(?:€\s?\d[\d.]*|\d[\d.]*\s?€|\d[\d.]*\s?(?:EUR|Euro)\b)[^.!?]{0,40}", text, re.I)
-    if salary_match:
-        salary = normalize_space(salary_match.group(0))
-
-    remote_type = ""
-    if re.search(r"\bhybrid\b", text, re.I): remote_type = "Hybrid"
-    elif re.search(r"\b(remote|homeoffice|home office)\b", text, re.I): remote_type = "Remote"
-    elif re.search(r"\bvor ort\b|\bon[- ]?site\b", text, re.I): remote_type = "Vor Ort"
-
-    posted_date = None
-    date_value = (data or {}).get("datePosted")
-    if date_value:
-        try:
-            posted_date = datetime.fromisoformat(str(date_value).replace("Z", "+00:00"))
-        except ValueError:
-            pass
+    employment = employment or infer_employment_type(" ".join((title, description)))
 
     job_id = ""
     path = urlparse(url).path
