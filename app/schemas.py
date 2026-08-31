@@ -25,24 +25,42 @@ class JobStatusUpdate(BaseModel):
     status: str = Field(pattern="^(new|seen|saved|applied|rejected)$")
 
 class SearchProfile(BaseModel):
+    name: str = "Mein Profil"
+    study: str = ""
+    # Legacy alias kept for compatibility with older API clients/tests.
+    keywords: list[str] = Field(default_factory=list)
+    target_roles: list[str] = Field(default_factory=lambda: [
+        "Data Analytics", "Data Analyst", "Business Intelligence",
+        "Risk Management", "Risikomanagement", "Finance", "Banking", "Controlling"
+    ])
+    industries: list[str] = Field(default_factory=lambda: ["Finance", "Banking", "FinTech", "Insurance"])
+    skills: list[str] = Field(default_factory=lambda: ["Python", "SQL", "Excel", "Power BI"])
+    additional_keywords: list[str] = Field(default_factory=list)
+    exclusions: list[str] = Field(default_factory=lambda: [
+        "IT Support", "Helpdesk", "1st Level Support", "2nd Level Support",
+        "Call Center", "Callcenter", "Technischer Support", "Systemadministrator",
+        "Praktikum", "Ausbildung", "Vollzeit", "Senior", "Manager", "Director"
+    ])
     location: str = "Berlin"
     radius_km: int = Field(default=20, ge=0, le=200)
-    min_score: int = Field(default=70, ge=0, le=100)
+    remote_types: list[str] = Field(default_factory=lambda: ["Hybrid", "Remote", "Berlin"])
+    languages: list[str] = Field(default_factory=lambda: ["Deutsch", "Englisch"])
     hours_min: int = Field(default=15, ge=0, le=80)
     hours_max: int = Field(default=20, ge=0, le=80)
-    remote_types: list[str] = ["Hybrid", "Remote", "Berlin"]
-    languages: list[str] = ["Deutsch", "Englisch"]
-    keywords: list[str] = [
-        "Finance","Banking","Risikomanagement","Risk Management","Controlling",
-        "Accounting","Recruiting","Human Resources","Customer Service","Data",
-        "Data Analysis","AI","Artificial Intelligence","IT","Software",
-        "Operations","Business Development"
-    ]
-    exclusions: list[str] = [
-        "Vollzeit","Praktikum","Ausbildung","Minijob","Senior","Manager","Director"
-    ]
-    sources: list[str] = ["stepstone", "indeed", "generic"]
+    min_score: int = Field(default=70, ge=0, le=100)
+    sources: list[str] = Field(default_factory=lambda: ["stepstone", "indeed", "generic"])
     scan_interval_minutes: int = Field(default=60, ge=5, le=1440)
+    weights: dict[str, int] = Field(default_factory=lambda: {
+        "role": 35, "study": 10, "skills": 20, "industry": 10,
+        "employment": 10, "location": 10, "hours": 5
+    })
+
+class ProfileList(BaseModel):
+    active: str
+    profiles: dict[str, SearchProfile]
+
+class ActiveProfile(BaseModel):
+    name: str
 
 class ScanStatus(BaseModel):
     running: bool

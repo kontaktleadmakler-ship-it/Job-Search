@@ -1,10 +1,20 @@
 {% extends "base.html" %}{% block title %}Suchprofil · Berlin Job Radar{% endblock %}
 {% block content %}
-<section class="page-head"><div><p class="eyebrow">KONFIGURATION</p><h1>Suchprofil</h1></div></section>
+<section class="page-head"><div><p class="eyebrow">MATCHING ENGINE</p><h1>Dein Job-Profil</h1><p>Du bestimmst selbst, welche Stellen relevant sind. Das Profil wird beim nächsten Scan verwendet.</p></div></section>
+<div class="panel">
+<div class="filters"><select id="profile_select"></select><button onclick="newProfile()">+ Neues Profil</button><button onclick="deleteProfile()">Profil löschen</button></div>
 <form id="settings-form" class="settings">
-<label>Standort<input id="location"></label><label>Radius (km)<input id="radius_km" type="number"></label><label>Mindestscore<input id="min_score" type="number" min="0" max="100"></label>
-<label>Stunden min.<input id="hours_min" type="number"></label><label>Stunden max.<input id="hours_max" type="number"></label><label>Scanintervall (Min.)<input id="scan_interval_minutes" type="number"></label>
-<label>Keywords <textarea id="keywords"></textarea></label><label>Ausschlüsse <textarea id="exclusions"></textarea></label><label>Remote-Typen <input id="remote_types"></label>
-<div><button class="primary" type="submit">Speichern</button><span id="saved"></span></div>
-</form>
+<label>Profilname<input id="name"></label>
+<label>Studiengang / Ausbildung<input id="study" placeholder="z. B. Wirtschaftsinformatik"></label>
+<label>Standort<input id="location"></label><label>Radius (km)<input id="radius_km" type="number"></label>
+<label>Stunden min.<input id="hours_min" type="number"></label><label>Stunden max.<input id="hours_max" type="number"></label>
+<label>Mindestscore<input id="min_score" type="number" min="0" max="100"></label><label>Scanintervall (Min.)<input id="scan_interval_minutes" type="number"></label>
+<label>Zielpositionen <small>Nur diese Begriffe treiben die Jobsuche.</small><textarea id="target_roles" placeholder="Data Analytics, Risk Management, Finance"></textarea></label>
+<label>Branchen <textarea id="industries" placeholder="Finance, Banking, FinTech"></textarea></label>
+<label>Skills <textarea id="skills" placeholder="Python, SQL, Excel, Power BI"></textarea></label>
+<label>Weitere Keywords <textarea id="additional_keywords"></textarea></label>
+<label>Ausschlüsse <small>Diese Begriffe im Jobtitel führen zum Ausschluss.</small><textarea id="exclusions" placeholder="IT Support, Helpdesk, Call Center"></textarea></label>
+<label>Remote-Typen <input id="remote_types"></label>
+<div><button class="primary" type="submit">Profil speichern & aktivieren</button><span id="saved"></span></div>
+</form></div>
 {% endblock %}

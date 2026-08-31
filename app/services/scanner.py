@@ -18,7 +18,17 @@ from app.models import Job, JobSource
 log = logging.getLogger(__name__)
 
 def build_queries(profile):
-    return [f"Werkstudent {kw} {profile.location}" for kw in profile.keywords]
+    # Search only from the user's target roles. Skills such as "IT" or "Python"
+    # are deliberately not used as standalone discovery queries because they are
+    # too broad and produce unrelated Werkstudent jobs.
+    # Explicit legacy/API keywords take precedence when supplied.
+    roles = profile.keywords or profile.target_roles or profile.additional_keywords
+    queries = []
+    for role in roles:
+        q = f"Werkstudent {role} {profile.location}".strip()
+        if q not in queries:
+            queries.append(q)
+    return queries
 
 class ScanManager:
     def __init__(self, db, profile):
@@ -119,6 +129,7 @@ class ScanManager:
             return
         if score < self.profile.min_score:
             self.status["filtered"] += 1
+            return
         job = Job(
             title=raw.title[:500], company=raw.company[:300], location=raw.location[:300],
             description=raw.description[:10000], url=raw.url[:2000], canonical_url=url,
