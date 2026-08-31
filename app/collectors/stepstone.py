@@ -4,9 +4,11 @@ class StepStoneCollector(JobCollector):
     name = "stepstone"
 
     async def search(self, query: str, location: str, filters: dict) -> list[RawJob]:
-        # Direct automated access is deliberately conservative. Use public discovery
-        # results instead of bypassing robots/CAPTCHA/anti-bot controls.
         discovery = filters.get("discovery")
-        if not discovery:
+        profile = filters.get("profile")
+        if not discovery or not profile:
             return []
-        return await discovery.search_site(query, location, "stepstone.de")
+        out = []
+        for employment_type in (profile.employment_types or ["Werkstudent"]):
+            out.extend(await discovery.search_site(query, location, self.name, employment_type))
+        return out

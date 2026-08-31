@@ -4,8 +4,11 @@ class IndeedCollector(JobCollector):
     name = "indeed"
 
     async def search(self, query: str, location: str, filters: dict) -> list[RawJob]:
-        # Same safe fallback policy as StepStone: public discovery only.
         discovery = filters.get("discovery")
-        if not discovery:
+        profile = filters.get("profile")
+        if not discovery or not profile:
             return []
-        return await discovery.search_site(query, location, "de.indeed.com")
+        out = []
+        for employment_type in (profile.employment_types or ["Werkstudent"]):
+            out.extend(await discovery.search_site(query, location, self.name, employment_type))
+        return out

@@ -20,7 +20,6 @@ class RawJob:
 
 class JobCollector:
     name = "base"
-
     async def search(self, query: str, location: str, filters: dict) -> list[RawJob]:
         raise NotImplementedError
 

@@ -1,5 +1,5 @@
+from pydantic import BaseModel, ConfigDict, Field
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
 
 class JobOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -22,7 +22,7 @@ class JobOut(BaseModel):
     status: str
 
 class JobStatusUpdate(BaseModel):
-    status: str = Field(pattern="^(new|seen|saved|applied|rejected)$")
+    status: str = Field(pattern=r"^(new|seen|saved|applied|rejected)$")
 
 class SearchProfile(BaseModel):
     location: str = "Berlin"
@@ -30,34 +30,33 @@ class SearchProfile(BaseModel):
     min_score: int = Field(default=60, ge=0, le=100)
     hours_min: int = Field(default=15, ge=0, le=80)
     hours_max: int = Field(default=20, ge=0, le=80)
-    remote_types: list[str] = ["Hybrid", "Remote"]
-    languages: list[str] = ["Deutsch", "Englisch"]
-
-    # User-controlled target profile. `keywords` is retained for backwards compatibility.
-    target_roles: list[str] = [
+    remote_types: list[str] = Field(default_factory=lambda: ["Hybrid", "Remote"])
+    languages: list[str] = Field(default_factory=lambda: ["Deutsch", "Englisch"])
+    employment_types: list[str] = Field(default_factory=lambda: ["Werkstudent"])
+    target_roles: list[str] = Field(default_factory=lambda: [
         "Data Analytics", "Data Analyst", "Business Intelligence",
         "Risk Management", "Risikomanagement", "Finance", "Banking",
         "Controlling", "Accounting", "Recruiting", "Human Resources",
         "Customer Service", "Operations", "Business Development"
-    ]
-    skills: list[str] = ["Python", "SQL", "Excel", "Power BI"]
-    keywords: list[str] = []
-    exclusions: list[str] = [
-        "Vollzeit", "Praktikum", "Ausbildung", "Minijob", "Senior", "Manager", "Director",
-        "IT Support", "Helpdesk", "1st Level Support", "2nd Level Support", "First Level Support",
-        "Second Level Support", "Technischer Support", "Technical Support", "Systemadministrator",
-        "System Administration"
-    ]
-    sources: list[str] = [
+    ])
+    skills: list[str] = Field(default_factory=lambda: ["Python", "SQL", "Excel", "Power BI"])
+    keywords: list[str] = Field(default_factory=list)
+    exclusions: list[str] = Field(default_factory=lambda: [
+        "Ausbildung", "Minijob", "Senior", "Manager", "Director",
+        "IT Support", "Helpdesk", "1st Level Support", "2nd Level Support",
+        "First Level Support", "Second Level Support", "Technischer Support",
+        "Technical Support", "Systemadministrator", "System Administration"
+    ])
+    sources: list[str] = Field(default_factory=lambda: [
         "stepstone", "indeed", "generic", "xing", "monster",
-        "jobware", "kimeta", "linkedin", "arbeitsagentur",
-    ]
+        "jobware", "kimeta", "linkedin", "arbeitsagentur"
+    ])
     scan_interval_minutes: int = Field(default=60, ge=5, le=1440)
 
     def effective_roles(self) -> list[str]:
-        # Legacy profiles stored their target roles in `keywords`. If the user
-        # supplies legacy keywords and no explicit target_roles, keep them as
-        # the search roles so existing configurations do not suddenly broaden.
-        roles = self.keywords if self.keywords and self.target_roles == SearchProfile.model_fields["target_roles"].default else self.target_roles
-        roles = roles or self.keywords
+        default_roles = type(self).model_fields["target_roles"].default_factory()
+        if self.keywords and self.target_roles == default_roles:
+            roles = self.keywords
+        else:
+            roles = self.target_roles or self.keywords
         return list(dict.fromkeys(x.strip() for x in roles if x and x.strip()))

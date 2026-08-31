@@ -4,9 +4,11 @@ class KimetaCollector(JobCollector):
     name = "kimeta"
 
     async def search(self, query: str, location: str, filters: dict) -> list[RawJob]:
-        # Gleiche konservative Policy wie StepStone/Indeed: nur oeffentliche
-        # Suchmaschinen-Discovery, kein Login/CAPTCHA/Anti-Bot-Bypass.
         discovery = filters.get("discovery")
-        if not discovery:
+        profile = filters.get("profile")
+        if not discovery or not profile:
             return []
-        return await discovery.search_site(query, location, "kimeta.de")
+        out = []
+        for employment_type in (profile.employment_types or ["Werkstudent"]):
+            out.extend(await discovery.search_site(query, location, self.name, employment_type))
+        return out

@@ -24,10 +24,8 @@ from app.models import Job, JobSource
 log = logging.getLogger(__name__)
 
 def build_queries(profile):
-    """Build broad role queries only. Location is added by the collector once."""
     roles = profile.effective_roles()
-    # Search several role families, but never search skills such as Python/SQL as jobs.
-    return [f"Werkstudent {role} {profile.location}" for role in roles[:20]]
+    return roles[:15]
 
 class ScanManager:
     def __init__(self, db, profile):
@@ -41,14 +39,26 @@ class ScanManager:
         try:
             r = await client.get(raw.url, timeout=min(12, get_settings().request_timeout), follow_redirects=True)
             r.raise_for_status()
-            parsed = parse_html(r.text, str(r.url), raw.source)
+            final_url = str(r.url)
+            from app.services.discovery import is_direct_job_url, is_generic_job_url
+            if raw.source != "generic":
+                if not is_direct_job_url(final_url, raw.source):
+                    final_url = raw.url
+            elif not is_generic_job_url(final_url):
+                final_url = raw.url
+            parsed = parse_html(r.text, final_url, raw.source)
             if parsed:
-                # Search-engine title is often better; keep it if parser title is weak.
                 if len(parsed.title) >= 8: raw.title = parsed.title
                 if parsed.company: raw.company = parsed.company
                 if parsed.location: raw.location = parsed.location
                 if parsed.description: raw.description = parsed.description
-                raw.url = str(r.url)
+                if parsed.employment_type: raw.employment_type = parsed.employment_type
+                if parsed.hours: raw.hours = parsed.hours
+                if parsed.salary: raw.salary = parsed.salary
+                if parsed.remote_type: raw.remote_type = parsed.remote_type
+                if parsed.posted_date: raw.posted_date = parsed.posted_date
+                if parsed.source_job_id: raw.source_job_id = parsed.source_job_id
+                raw.url = final_url
         except Exception as e:
             log.debug("job enrichment failed %s: %s", raw.url, e)
         return raw
@@ -81,7 +91,7 @@ class ScanManager:
                         count = errors = 0; seen_local = set()
                         for q in build_queries(self.profile):
                             try:
-                                jobs = await collector.search(q, self.profile.location, {"discovery": discovery, "client": client})
+                                jobs = await collector.search(q, self.profile.location, {"discovery": discovery, "client": client, "profile": self.profile})
                                 for raw in jobs:
                                     raw.source = name
                                     raw = await self._enrich(client, raw)
