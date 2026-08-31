@@ -25,51 +25,36 @@ class JobStatusUpdate(BaseModel):
     status: str = Field(pattern="^(new|seen|saved|applied|rejected)$")
 
 class SearchProfile(BaseModel):
-    name: str = "Mein Profil"
-    study: str = ""
-    # Legacy alias kept for compatibility with older API clients/tests.
-    keywords: list[str] = Field(default_factory=list)
-    target_roles: list[str] = Field(default_factory=lambda: [
-        "Data Analytics", "Data Analyst", "Business Intelligence",
-        "Risk Management", "Risikomanagement", "Finance", "Banking", "Controlling"
-    ])
-    industries: list[str] = Field(default_factory=lambda: ["Finance", "Banking", "FinTech", "Insurance"])
-    skills: list[str] = Field(default_factory=lambda: ["Python", "SQL", "Excel", "Power BI"])
-    additional_keywords: list[str] = Field(default_factory=list)
-    exclusions: list[str] = Field(default_factory=lambda: [
-        "IT Support", "Helpdesk", "1st Level Support", "2nd Level Support",
-        "Call Center", "Callcenter", "Technischer Support", "Systemadministrator",
-        "Praktikum", "Ausbildung", "Vollzeit", "Senior", "Manager", "Director"
-    ])
     location: str = "Berlin"
     radius_km: int = Field(default=20, ge=0, le=200)
-    remote_types: list[str] = Field(default_factory=lambda: ["Hybrid", "Remote", "Berlin"])
-    languages: list[str] = Field(default_factory=lambda: ["Deutsch", "Englisch"])
+    min_score: int = Field(default=60, ge=0, le=100)
     hours_min: int = Field(default=15, ge=0, le=80)
     hours_max: int = Field(default=20, ge=0, le=80)
-    min_score: int = Field(default=70, ge=0, le=100)
-    sources: list[str] = Field(default_factory=lambda: ["stepstone", "indeed", "generic"])
+    remote_types: list[str] = ["Hybrid", "Remote"]
+    languages: list[str] = ["Deutsch", "Englisch"]
+
+    # User-controlled target profile. `keywords` is retained for backwards compatibility.
+    target_roles: list[str] = [
+        "Data Analytics", "Data Analyst", "Business Intelligence",
+        "Risk Management", "Risikomanagement", "Finance", "Banking",
+        "Controlling", "Accounting", "Recruiting", "Human Resources",
+        "Customer Service", "Operations", "Business Development"
+    ]
+    skills: list[str] = ["Python", "SQL", "Excel", "Power BI"]
+    keywords: list[str] = []
+    exclusions: list[str] = [
+        "Vollzeit", "Praktikum", "Ausbildung", "Minijob", "Senior", "Manager", "Director",
+        "IT Support", "Helpdesk", "1st Level Support", "2nd Level Support", "First Level Support",
+        "Second Level Support", "Technischer Support", "Technical Support", "Systemadministrator",
+        "System Administration"
+    ]
+    sources: list[str] = ["stepstone", "indeed", "generic"]
     scan_interval_minutes: int = Field(default=60, ge=5, le=1440)
-    weights: dict[str, int] = Field(default_factory=lambda: {
-        "role": 35, "study": 10, "skills": 20, "industry": 10,
-        "employment": 10, "location": 10, "hours": 5
-    })
 
-class ProfileList(BaseModel):
-    active: str
-    profiles: dict[str, SearchProfile]
-
-class ActiveProfile(BaseModel):
-    name: str
-
-class ScanStatus(BaseModel):
-    running: bool
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    last_error: str | None = None
-    found: int = 0
-    new: int = 0
-    duplicates: int = 0
-    filtered: int = 0
-    errors: int = 0
-    collectors: dict[str, dict] = Field(default_factory=dict)
+    def effective_roles(self) -> list[str]:
+        # Legacy profiles stored their target roles in `keywords`. If the user
+        # supplies legacy keywords and no explicit target_roles, keep them as
+        # the search roles so existing configurations do not suddenly broaden.
+        roles = self.keywords if self.keywords and self.target_roles == SearchProfile.model_fields["target_roles"].default else self.target_roles
+        roles = roles or self.keywords
+        return list(dict.fromkeys(x.strip() for x in roles if x and x.strip()))

@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-from urllib.parse import urlparse
 import httpx
 from sqlalchemy import select, or_
 from app.config import get_settings
@@ -13,135 +12,99 @@ from app.collectors.base import RawJob, safe_job_url
 from app.services.discovery import PublicDiscovery
 from app.services.deduplicator import canonicalize_url, fingerprint
 from app.services.matcher import score_job
+from app.services.job_parser import parse_html
 from app.models import Job, JobSource
 
 log = logging.getLogger(__name__)
 
 def build_queries(profile):
-    # Search only from the user's target roles. Skills such as "IT" or "Python"
-    # are deliberately not used as standalone discovery queries because they are
-    # too broad and produce unrelated Werkstudent jobs.
-    # Explicit legacy/API keywords take precedence when supplied.
-    roles = profile.keywords or profile.target_roles or profile.additional_keywords
-    queries = []
-    for role in roles:
-        q = f"Werkstudent {role} {profile.location}".strip()
-        if q not in queries:
-            queries.append(q)
-    return queries
+    """Build broad role queries only. Location is added by the collector once."""
+    roles = profile.effective_roles()
+    # Search several role families, but never search skills such as Python/SQL as jobs.
+    return [f"Werkstudent {role} {profile.location}" for role in roles[:20]]
 
 class ScanManager:
     def __init__(self, db, profile):
-        self.db = db
-        self.profile = profile
-        self.running = False
-        self.status = {
-            "running": False, "started_at": None, "finished_at": None,
-            "last_error": None, "found": 0, "new": 0, "duplicates": 0,
-            "filtered": 0, "errors": 0, "collectors": {}
-        }
+        self.db = db; self.profile = profile; self.running = False
+        self.status = {"running": False, "started_at": None, "finished_at": None, "last_error": None,
+                       "found": 0, "new": 0, "duplicates": 0, "filtered": 0, "errors": 0, "collectors": {}}
         self.lock = asyncio.Lock()
 
+    async def _enrich(self, client: httpx.AsyncClient, raw: RawJob) -> RawJob:
+        if not safe_job_url(raw.url): return raw
+        try:
+            r = await client.get(raw.url, timeout=min(12, get_settings().request_timeout), follow_redirects=True)
+            r.raise_for_status()
+            parsed = parse_html(r.text, str(r.url), raw.source)
+            if parsed:
+                # Search-engine title is often better; keep it if parser title is weak.
+                if len(parsed.title) >= 8: raw.title = parsed.title
+                if parsed.company: raw.company = parsed.company
+                if parsed.location: raw.location = parsed.location
+                if parsed.description: raw.description = parsed.description
+                raw.url = str(r.url)
+        except Exception as e:
+            log.debug("job enrichment failed %s: %s", raw.url, e)
+        return raw
+
     async def scan(self):
-        if self.lock.locked():
-            return self.status
+        if self.lock.locked(): return self.status
         async with self.lock:
-            settings = get_settings()
-            self.running = True
-            self.status.update({
-                "running": True, "started_at": datetime.now(timezone.utc),
-                "finished_at": None, "last_error": None, "found": 0,
-                "new": 0, "duplicates": 0, "filtered": 0, "errors": 0, "collectors": {}
-            })
+            settings = get_settings(); self.running = True
+            self.status.update({"running": True, "started_at": datetime.now(timezone.utc), "finished_at": None,
+                                "last_error": None, "found": 0, "new": 0, "duplicates": 0, "filtered": 0, "errors": 0, "collectors": {}})
             limits = httpx.Limits(max_connections=settings.max_concurrent_requests, max_keepalive_connections=settings.max_concurrent_requests)
-            sem = asyncio.Semaphore(settings.max_concurrent_requests)
             headers = {"User-Agent": settings.user_agent, "Accept-Language": "de-DE,de;q=0.8,en;q=0.6"}
             try:
                 async with httpx.AsyncClient(timeout=settings.request_timeout, headers=headers, limits=limits, follow_redirects=True) as client:
                     discovery = PublicDiscovery(client, settings.discovery_max_results, 1.0 / max(settings.request_rate_per_second, 0.1))
-                    collectors = {
-                        "stepstone": StepStoneCollector(),
-                        "indeed": IndeedCollector(),
-                        "generic": GenericCollector(),
-                    }
-                    async def run_query(collector, name, q):
-                        async with sem:
-                            return await collector.search(q, self.profile.location, {"discovery": discovery})
-
+                    collectors = {"stepstone": StepStoneCollector(), "indeed": IndeedCollector(), "generic": GenericCollector()}
                     for name in self.profile.sources:
                         collector = collectors.get(name)
-                        if not collector:
-                            continue
-                        results = await asyncio.gather(
-                            *(run_query(collector, name, q) for q in build_queries(self.profile)),
-                            return_exceptions=True,
-                        )
-                        count = errors = 0
-                        seen_local = set()
-                        for result in results:
-                            if isinstance(result, Exception):
-                                errors += 1
-                                log.warning("%s query failed: %s", name, result)
-                                continue
-                            for raw in result:
-                                key = canonicalize_url(raw.url)
-                                if not safe_job_url(raw.url) or key in seen_local:
-                                    self.status["duplicates"] += 1
-                                    continue
-                                seen_local.add(key)
-                                raw.source = name
-                                await self._upsert(raw)
-                                count += 1
+                        if not collector: continue
+                        count = errors = 0; seen_local = set()
+                        for q in build_queries(self.profile):
+                            try:
+                                jobs = await collector.search(q, self.profile.location, {"discovery": discovery})
+                                for raw in jobs:
+                                    raw.source = name
+                                    raw = await self._enrich(client, raw)
+                                    key = canonicalize_url(raw.url)
+                                    if not safe_job_url(raw.url) or key in seen_local: continue
+                                    seen_local.add(key)
+                                    await self._upsert(raw)
+                                    count += 1
+                            except Exception as e:
+                                errors += 1; log.warning("%s query failed: %s", name, e)
                         provider = discovery.last_provider or "none"
-                        status = "OK" if errors == 0 and count else ("PARTIAL" if count or errors else "NO_RESULTS")
-                        self.status["collectors"][name] = {
-                            "jobs": count, "errors": errors, "status": status, "provider": provider
-                        }
+                        self.status["collectors"][name] = {"jobs": count, "errors": errors,
+                            "status": "OK" if count and not errors else ("PARTIAL" if count or errors else "NO_RESULTS"), "provider": provider}
                         self.status["errors"] += errors
                 self.db.commit()
             except Exception as e:
-                self.db.rollback()
-                self.status["last_error"] = str(e)
-                log.exception("scan failed")
+                self.db.rollback(); self.status["last_error"] = str(e); log.exception("scan failed")
             finally:
-                self.status["running"] = False
-                self.running = False
-                self.status["finished_at"] = datetime.now(timezone.utc)
+                self.status["running"] = False; self.running = False; self.status["finished_at"] = datetime.now(timezone.utc)
             return self.status
 
     async def _upsert(self, raw: RawJob):
-        from app.services.matcher import score_job
-        url = canonicalize_url(raw.url)
-        fp = fingerprint(raw)
+        url = canonicalize_url(raw.url); fp = fingerprint(raw)
         existing = self.db.execute(select(Job).where(or_(Job.canonical_url == url, Job.fingerprint == fp))).scalar_one_or_none()
         score, reasons = score_job(raw, self.profile)
         if existing:
             existing.updated_at = datetime.now(timezone.utc)
-            if score > existing.match_score:
-                existing.match_score = score
-                existing.match_reasons = json.dumps(reasons, ensure_ascii=False)
-            prior = self.db.execute(
-                select(JobSource).where(JobSource.job_id == existing.id, JobSource.url == raw.url)
-            ).scalar_one_or_none()
-            if not prior:
-                self.db.add(JobSource(job_id=existing.id, source=raw.source[:100], url=raw.url[:2000], source_job_id=raw.source_job_id))
+            # Re-score existing jobs with the current profile; this is important after profile changes.
+            existing.match_score = score
+            existing.match_reasons = json.dumps(reasons, ensure_ascii=False)
             self.status["duplicates"] += 1
             return
         if score < self.profile.min_score:
             self.status["filtered"] += 1
-            return
-        job = Job(
-            title=raw.title[:500], company=raw.company[:300], location=raw.location[:300],
-            description=raw.description[:10000], url=raw.url[:2000], canonical_url=url,
-            source=raw.source[:100], source_job_id=raw.source_job_id,
-            employment_type=raw.employment_type[:100], hours=raw.hours[:100],
-            salary=raw.salary[:300], remote_type=raw.remote_type[:100],
-            posted_date=raw.posted_date, match_score=score,
-            match_reasons=json.dumps(reasons, ensure_ascii=False),
-            status="new", fingerprint=fp
-        )
-        self.db.add(job)
-        self.db.flush()
+            # Keep low-score jobs in DB for transparency, but they remain hidden at the UI's default threshold.
+        job = Job(title=raw.title[:500], company=raw.company[:300], location=raw.location[:300], description=raw.description[:10000],
+                  url=raw.url[:2000], canonical_url=url, source=raw.source[:100], source_job_id=raw.source_job_id,
+                  employment_type=raw.employment_type[:100], hours=raw.hours[:100], salary=raw.salary[:300], remote_type=raw.remote_type[:100],
+                  posted_date=raw.posted_date, match_score=score, match_reasons=json.dumps(reasons, ensure_ascii=False), status="new", fingerprint=fp)
+        self.db.add(job); self.db.flush()
         self.db.add(JobSource(job_id=job.id, source=raw.source[:100], url=raw.url[:2000], source_job_id=raw.source_job_id))
-        self.status["new"] += 1
-        self.status["found"] += 1
+        self.status["new"] += 1; self.status["found"] += 1
