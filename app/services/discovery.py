@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 from urllib.parse import quote_plus, urlparse, parse_qs, unquote
+import base64
 import httpx
 from bs4 import BeautifulSoup
 from app.collectors.base import RawJob, safe_job_url, normalize_space
@@ -33,13 +34,42 @@ class PublicDiscovery:
 
     @staticmethod
     def _unwrap(url: str) -> str:
-        # Search engines sometimes wrap result URLs. Extract common redirect targets.
+        """Unwrap common public-search redirect URLs without following them.
+
+        Bing commonly uses ``/ck/a?...&u=a1<base64url>`` links.  The target
+        can therefore be hidden behind URL encoding and a URL-safe base64
+        payload.  We decode only the redirect value and never make a request
+        to the redirect URL here.
+        """
         try:
-            p = urlparse(url)
+            current = unquote(url)
+            p = urlparse(current)
             qs = parse_qs(p.query)
-            for key in ("uddg", "url", "u"):
-                if qs.get(key):
-                    return unquote(qs[key][0])
+
+            for key in ("uddg", "url"):
+                value = qs.get(key, [None])[0]
+                if value:
+                    target = unquote(value)
+                    if urlparse(target).scheme in {"http", "https"}:
+                        return target
+
+            bing_u = qs.get("u", [None])[0]
+            if bing_u:
+                value = unquote(bing_u)
+                # Bing's public result redirect format uses an ``a1`` prefix
+                # followed by URL-safe base64.
+                candidates = [value[2:]] if value.startswith("a1") else []
+                candidates.append(value)
+                for encoded in candidates:
+                    try:
+                        padded = encoded + "=" * (-len(encoded) % 4)
+                        decoded = base64.urlsafe_b64decode(padded).decode("utf-8")
+                        if urlparse(decoded).scheme in {"http", "https"}:
+                            return decoded
+                    except (ValueError, UnicodeDecodeError):
+                        continue
+                if urlparse(value).scheme in {"http", "https"}:
+                    return value
         except Exception:
             pass
         return url
